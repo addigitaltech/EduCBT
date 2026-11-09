@@ -1,0 +1,58 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('roles', function (Blueprint $table): void {
+            $table->id();
+            $table->char('uuid', 36)->unique();
+            $table->string('scope', 16);
+            $table->string('slug', 80);
+            $table->string('name', 120);
+            $table->string('description')->nullable();
+            $table->boolean('is_system')->default(false);
+            $table->timestamps();
+
+            $table->unique(['scope', 'slug']);
+        });
+
+        Schema::create('permissions', function (Blueprint $table): void {
+            $table->id();
+            $table->string('scope', 16);
+            $table->string('key', 120)->unique();
+            $table->string('group', 60);
+            $table->string('description')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('permission_role', function (Blueprint $table): void {
+            $table->foreignId('role_id')->constrained('roles')->cascadeOnDelete();
+            $table->foreignId('permission_id')->constrained('permissions')->cascadeOnDelete();
+
+            $table->primary(['role_id', 'permission_id']);
+        });
+
+        Schema::create('role_user', function (Blueprint $table): void {
+            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
+            $table->foreignId('role_id')->constrained('roles')->restrictOnDelete();
+            $table->foreignId('assigned_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('created_at')->nullable();
+
+            $table->primary(['user_id', 'role_id']);
+            $table->index('role_id');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('role_user');
+        Schema::dropIfExists('permission_role');
+        Schema::dropIfExists('permissions');
+        Schema::dropIfExists('roles');
+    }
+};

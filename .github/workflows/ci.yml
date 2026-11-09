@@ -1,0 +1,134 @@
+name: CI
+
+# Runs on every push and pull request. Nobody has to run tests by hand: the
+# results appear on the pull request. Phase code is reported as UNTESTED until
+# these jobs have run and passed.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.profile }}, SQLite)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [school, central]
+    env:
+      APP_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, sodium, pdo_sqlite, sqlite3
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the application skeleton and install dependencies
+        run: bash scripts/bootstrap.sh --ci --no-build --no-tests
+      - name: Run the test suite
+        run: ./vendor/bin/pest
+
+  database:
+    name: Migrations and tests (${{ matrix.db }}, ${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: ['mariadb:10.6', 'mysql:8.0']
+        profile: [school, central]
+    services:
+      db:
+        image: ${{ matrix.db }}
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: educbt_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -psecret"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_PROFILE: ${{ matrix.profile }}
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: educbt_test
+      DB_USERNAME: root
+      DB_PASSWORD: secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, sodium, pdo_mysql
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the application skeleton and install dependencies
+        run: bash scripts/bootstrap.sh --ci --no-build --no-tests
+      - name: Run the test suite against the real database
+        run: ./vendor/bin/pest --testsuite=Feature
+
+  quality:
+    name: Style and static analysis (not blocking in Phase 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, sodium, pdo_sqlite, sqlite3
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the application skeleton and install dependencies
+        run: bash scripts/bootstrap.sh --ci --no-build --no-tests
+      - name: Code style (Pint)
+        continue-on-error: true
+        run: ./vendor/bin/pint --test
+      - name: Static analysis (Larastan)
+        continue-on-error: true
+        run: ./vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+      - name: Dependency security audit
+        continue-on-error: true
+        run: composer audit
+
+  frontend:
+    name: Front-end build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, bcmath, sodium, pdo_sqlite, sqlite3
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the application skeleton and the production assets
+        run: bash scripts/bootstrap.sh --ci --no-tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: built-assets
+          path: public/build
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
